@@ -1,6 +1,6 @@
 <div align=center>
 
-<img src="icons/icon-192.png" alt="Shank 2" width="20%">
+<img width="616" height="353" alt="capsule_616x353" src="https://github.com/user-attachments/assets/3b4a92a2-df88-4775-a116-905eff507ec2" />
 
 </div>
 <h1 align=center>shank2-nx installer</h1>
@@ -12,7 +12,8 @@ You give it your own copy of the Xbox Live Arcade game (its content package, or 
 gives you a zip ready to extract into `sdmc:/switch/`. Everything runs in your browser: the game files never leave
 your computer.
 
-## What it does
+## What it does 
+
 
 1. Finds the game in what you chose: its content package (from `Content/0000000000000000/5841120C/000D0000/`, read in
    place, nothing is extracted to disk), the `5841120C` folder of an Xbox 360's `Content` folder, or an extracted game
@@ -30,7 +31,7 @@ your computer.
 
 The update zip (`shank2-nx-update.zip`) holds only `shank2.nro`, its licenses and the shaders.
 
-## What goes on the SD card
+## What goes on the SD card - <img width="50" height="50" alt="gflzte2SEjFWHIDZij" src="https://github.com/user-attachments/assets/dc5c65b6-c729-490c-bfed-c45d8b57840e" />
 
 ```text
 /switch/shank2-nx/
