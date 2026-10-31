@@ -1,0 +1,8 @@
+# The NRO is a release asset of the shank2-nx repository; the deployment workflow downloads it.
+release/*.nro
+*.zip
+node_modules/
+__pycache__/
+# Translated game shaders made by test/release_node.mjs: game data, never committed
+release/*.bin
+.claude/

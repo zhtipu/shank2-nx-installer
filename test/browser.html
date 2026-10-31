@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>sa2-nx installer: browser test</title>
+  <style>body { font: 14px/1.5 ui-monospace, monospace; margin: 16px; background: #fff; color: #000; } .bad { color: #b00; } .good { color: #070; }</style>
+</head>
+<body>
+<h1>Browser test</h1>
+<p>Serve the repository with <code>python serve.py 8193 . --test-files &lt;folder with 58411202&gt;</code> and open
+<code>/test/browser.html?package=58411202/000D0000/&lt;package file&gt;</code>. It runs the page's code in this browser:
+the package read through HTTP range requests, the game's shaders (1.0.3 on: deko3d_glsl.bin with Renut's translator,
+DXC and SPIRV-Cross; before it the native renderer's library), then an update package made by worker.js and downloaded
+through sw.js into this page (nothing is saved to disk).</p>
+<pre id="out"></pre>
+<script type="module">
+import { findGame, identifyGame, lzxStep, makeDeko3dPackage, makeShaderLibrary } from '../lib/installer.js';
+import createHlslModule from '../wasm/hlsl.mjs';
+import createDxcModule from '../wasm/dxc_web.mjs';
+import createPackModule from '../wasm/pack.mjs';
+import createLzxModule from '../wasm/lzx.mjs';
+import createRenutHlslModule from '../wasm/renut_hlsl.mjs';
+import createSpirvCrossModule from '../wasm/spirv_cross.mjs';
+
+const out = document.getElementById('out');
+const results = [];
+function say(text, state = '') {
+  const line = document.createElement('div');
+  line.textContent = text;
+  line.className = state;
+  out.appendChild(line);
+}
+function check(name, ok, detail = '') {
+  results.push({ name, ok });
+  say(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ': ' + detail : ''}`, ok ? 'good' : 'bad');
+}
+async function sha256(bytes) {
+  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+// a file of the test folder, read with range requests (like File.slice, without loading it)
+async function rangeFile(path) {
+  const url = `/_test/${path.split('/').map(encodeURIComponent).join('/')}`;
+  const head = await fetch(url, { method: 'HEAD' });
+  if (!head.ok) {
+    throw new Error(`${path}: HTTP ${head.status}`);
+  }
+  return {
+    path: path.slice(path.lastIndexOf('/') + 1),
+    size: Number(head.headers.get('content-length')),
+    read: async (offset, length) => {
+      const r = await fetch(url, { headers: { Range: `bytes=${offset}-${offset + length - 1}` } });
+      return new Uint8Array(await r.arrayBuffer());
+    },
+  };
+}
+
+const quiet = () => ({ print: () => {}, printErr: () => {} });
+const started = performance.now();
+try {
+  const packagePath = new URLSearchParams(location.search).get('package');
+  const manifest = await (await fetch('../release/manifest.json')).json();
+  const build = manifest.builds[0];
+  const shaderCommon = new Uint8Array(await (await fetch('../shader_common.h')).arrayBuffer());
+  const renutCommon = new Uint8Array(await (await fetch('../renut_shader_common.h')).arrayBuffer());
+
+  // 1. The package read in place, the game identified, the shader library made in this browser.
+  const chosen = await findGame([await rangeFile(packagePath)]);
+  check('the game package is found', chosen.game?.kind === 'package', `${chosen.game?.files.length} files`);
+  const modules = {
+    hlsl: await createHlslModule(quiet()),
+    dxc: await createDxcModule(quiet()),
+    pack: await createPackModule(quiet()),
+    lzx: await createLzxModule(quiet()),
+    renutHlsl: await createRenutHlslModule(quiet()),
+    spirvCross: await createSpirvCrossModule(quiet()),
+  };
+  const game = await identifyGame(chosen.game.files, manifest, lzxStep(modules.lzx));
+  check('default.xex is identified', game.build === build, game.xexHash);
+  const t0 = performance.now();
+  if (build.shaders) {
+    const { library, index } = await makeShaderLibrary(chosen.game.files, game.xex, build, modules, shaderCommon, (t) => say('  ' + t));
+    check('the shader library matches the tested one', (await sha256(library)) === build.library_sha256 &&
+      (await sha256(index)) === build.index_sha256, `${((performance.now() - t0) / 1000).toFixed(1)} s`);
+  }
+  if (build.deko3d) {
+    const pkg = await makeDeko3dPackage(chosen.game.files, game.xex, build, modules, renutCommon, (t) => say('  ' + t));
+    check('deko3d_glsl.bin matches the tested one', (await sha256(pkg)) === build.deko3d.package_sha256,
+      `${((performance.now() - t0) / 1000).toFixed(1)} s`);
+  }
+  const shaderFolder = (build.deko3d || build.shaders).folder.toLowerCase();
+
+  // 2. An update package through worker.js and sw.js, as the page makes it, from the files an extracted game has.
+  await navigator.serviceWorker.register('../sw.js', { updateViaCache: 'none' });
+  const registration = await navigator.serviceWorker.ready;
+  if (!navigator.serviceWorker.controller) {
+    const claimed = new Promise((resolve) => navigator.serviceWorker.addEventListener('controllerchange', resolve, { once: true }));
+    registration.active.postMessage({ type: 'claim' });
+    await claimed;
+  }
+  const controller = navigator.serviceWorker.controller;
+  check('sw.js controls the page', Boolean(controller));
+  const needed = chosen.game.files.filter((f) => f.path.toLowerCase() === 'default.xex' ||
+    f.path.toLowerCase().startsWith(shaderFolder + '/'));
+  const entries = [];
+  for (const f of needed) {
+    entries.push({ path: f.path, file: new File([await f.read(0, f.size)], f.path.slice(f.path.lastIndexOf('/') + 1)) });
+  }
+  const worker = new Worker('../worker.js', { type: 'module' });
+  const channel = new MessageChannel();
+  const zip = await new Promise((resolve, reject) => {
+    worker.onmessage = async ({ data }) => {
+      if (data.type === 'log') {
+        say('  [worker] ' + data.text);
+      } else if (data.type === 'size') {
+        const id = `test-${Date.now()}`;
+        const ack = new MessageChannel();
+        const registered = new Promise((done) => (ack.port1.onmessage = done));
+        controller.postMessage({ type: 'download', id, filename: 'sa2-nx-update.zip', size: data.size }, [channel.port2, ack.port2]);
+        await registered;
+        const response = await fetch(`../download/${id}/sa2-nx-update.zip`);
+        check('the download is served by sw.js', response.ok && response.headers.get('content-type') === 'application/zip' &&
+          Number(response.headers.get('content-length')) === data.size, `${data.size} bytes announced`);
+        resolve(new Uint8Array(await response.arrayBuffer()));
+      } else if (data.type === 'error') {
+        reject(new Error(data.message));
+      }
+    };
+    worker.onerror = (event) => reject(new Error(event.message));
+    worker.postMessage({ entries, lang: 'en', update: true, port: channel.port1 }, [channel.port1]);
+  });
+  worker.terminate();
+  // the entries of the zip, from its central directory (the classic end record is the last 22 bytes)
+  const view = new DataView(zip.buffer);
+  const names = [];
+  const hashes = {};
+  const count = view.getUint16(zip.length - 22 + 10, true);
+  for (let at = view.getUint32(zip.length - 22 + 16, true), i = 0; i < count; i++) {
+    const size = view.getUint32(at + 20, true);
+    const nameLength = view.getUint16(at + 28, true);
+    const local = view.getUint32(at + 42, true);
+    const name = new TextDecoder().decode(zip.subarray(at + 46, at + 46 + nameLength));
+    const data = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true);
+    names.push(name);
+    hashes[name] = await sha256(zip.subarray(data, data + size));
+    at += 46 + nameLength + view.getUint16(at + 30, true) + view.getUint16(at + 32, true);
+  }
+  const expected = ['sa2-nx/sa2.nro', 'sa2-nx/LICENSES.txt',
+    ...(build.shaders ? ['sa2-nx/sa2_shaders.mesp', 'sa2-nx/sa2_shaders.mesp.idx'] : []),
+    ...(build.deko3d ? ['sa2-nx/deko3d_glsl.bin'] : [])];
+  check('the update zip has the program, its licenses and the shaders', names.join() === expected.join(), names.join(', '));
+  check('the files in the zip are the tested ones', hashes['sa2-nx/sa2.nro'] === build.nro_sha256 &&
+    (!build.shaders || (hashes['sa2-nx/sa2_shaders.mesp'] === build.library_sha256 &&
+                        hashes['sa2-nx/sa2_shaders.mesp.idx'] === build.index_sha256)) &&
+    (!build.deko3d || hashes['sa2-nx/deko3d_glsl.bin'] === build.deko3d.package_sha256));
+  const cache = await caches.open('sa2-nx-programs');
+  check('the program is kept for offline use', (await cache.keys()).some((r) => r.url.includes(build.nro_sha256)));
+} catch (error) {
+  check('no error', false, error.stack || error.message);
+}
+const failed = results.filter((r) => !r.ok).length;
+say(`${results.length - failed} of ${results.length} checks passed in ${((performance.now() - started) / 1000).toFixed(1)} s`, failed ? 'bad' : 'good');
+window.testResult = { passed: results.length - failed, failed };
+</script>
+</body>
+</html>
