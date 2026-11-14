@@ -12,6 +12,9 @@ You give it your own copy of the Xbox Live Arcade game (its content package, or 
 gives you a zip ready to extract into `sdmc:/switch/`. Everything runs in your browser: the game files never leave
 your computer.
 
+> [!TIP]
+> Prefer one NSP with everything inside? [NX Porting Kit](https://github.com/zhtipu/nx-porting-kit) (Windows) builds it from your own copy of the game.
+
 ## What it does 
 
 
