@@ -3,12 +3,12 @@
   "builds": [
     {
       "edition": "Xbox Live Arcade",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "xex_sha256": "bcb4fb7c75a6e31075077f1a6518a83c70c7bc3cf638cd5b06a8e3328fc505ed",
       "image_sha256": "43025e7e0120ad3fc89e5a6b122ef14ffef6aefa96a554fbfc72ee730083e6d8",
       "nro": "shank2.nro",
-      "nro_sha256": "4e2320845655383e6760531bd26e00fdba509d548a4ac8cb27a9a636ae5dcd56",
-      "nro_size": 54036399,
+      "nro_sha256": "3a54093cd3db3d5a26ec9a315864381772fabf275deba7edddfd9461baba1303",
+      "nro_size": 54040495,
       "game_files": 153,
       "game_bytes": 1295051777,
       "game_data_fnv": "a072c432187e6477",
